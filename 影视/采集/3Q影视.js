@@ -2,7 +2,7 @@
 // @author W.Q, @wujiwanmei, @lucky_TJQ, tcxp, @shortai
 // @description 刮削：支持，弹幕：支持，嗅探：支持
 // @dependencies: axios, crypto
-// @version 1.0.4
+// @version 1.0.5
 // @downloadURL https://gh-proxy.org/https://github.com/Silent1566/OmniBox-Spider/raw/refs/heads/main/影视/采集/3Q影视.js
 
 /**
@@ -58,6 +58,25 @@ const PLAY_HEADERS = {
     "Referer": "https://qqqys.com/",
     "Origin": "https://qqqys.com"
 };
+
+const isHttpUrl = (u) => u && (u.startsWith('http://') || u.startsWith('https://'));
+const needsParser = (u) => /(iqiyi\.com|v\.qq\.com|youku\.com|mgtv\.com|bilibili\.com)/.test(String(u || ""));
+const isDirectPlayable = (u) => /\.(m3u8|mp4|flv|avi|mkv|ts)(?:\?|#|$)/i.test(String(u || ""));
+
+async function sniffPlayUrl(playUrl) {
+    try {
+        const sniffed = await OmniBox.sniffVideo(playUrl);
+        if (sniffed && sniffed.url) {
+            return {
+                url: sniffed.url,
+                header: sniffed.header || PLAY_HEADERS,
+            };
+        }
+    } catch (error) {
+        logInfo(`嗅探失败，回退原始地址: ${error.message}`);
+    }
+    return null;
+}
 
 /**
  * 日志工具函数
@@ -1475,12 +1494,9 @@ async function play(params) {
 
         logInfo(`播放参数 - 线路: ${play_from}, 解码状态: ${decode_status}, URL: ${raw_url.substring(0, 50)}...`);
 
-        const isHttpUrl = (u) => u && (u.startsWith('http://') || u.startsWith('https://'));
-        // 需要解析器的官方平台域名
-        const needsParser = (u) => /(iqiyi\.com|v\.qq\.com|youku\.com|mgtv\.com|bilibili\.com)/.test(u);
-
         let finalUrl = raw_url;
         let parseFlag = 0;
+        let playHeader = PLAY_HEADERS;
 
         // 1. 如果已经是 HTTP URL
         if (isHttpUrl(raw_url)) {
@@ -1506,11 +1522,24 @@ async function play(params) {
             }
         }
 
+        // 3. 非直链尝试嗅探真实视频地址
+        if (isHttpUrl(finalUrl) && !isDirectPlayable(finalUrl)) {
+            const sniffed = await sniffPlayUrl(finalUrl);
+            if (sniffed && sniffed.url) {
+                finalUrl = sniffed.url;
+                playHeader = sniffed.header || PLAY_HEADERS;
+                parseFlag = 0;
+                logInfo(`嗅探成功: ${finalUrl.substring(0, 80)}...`);
+            } else if (!needsParser(finalUrl)) {
+                parseFlag = 1;
+            }
+        }
+
         // 构建播放响应
         const playResponse = {
             urls: [{ name: "3Q影视", url: finalUrl }],
             parse: parseFlag,
-            header: PLAY_HEADERS
+            header: playHeader
         };
 
         // ========== 弹幕匹配 ========== 
